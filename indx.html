@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Realistic & Smooth Skyshot Showcase</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #010103;
+            color: #fff;
+            user-select: none;
+        }
+
+        /* Page 1: Password Gate */
+        #login-page {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            width: 100%;
+            height: 100%;
+            background: #04040c;
+            position: absolute;
+            z-index: 10;
+            transition: opacity 0.4s ease;
+        }
+        .login-box {
+            background: rgba(15, 15, 25, 0.9);
+            padding: 40px;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.7);
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            width: 90%;
+            max-width: 360px;
+        }
+        h2 {
+            margin-bottom: 20px;
+            font-size: 20px;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            color: #d1d5db;
+        }
+        input[type="password"] {
+            padding: 12px 20px;
+            width: 100%;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            background: #000;
+            border-radius: 25px;
+            margin-bottom: 20px;
+            outline: none;
+            font-size: 16px;
+            text-align: center;
+            color: #fff;
+            letter-spacing: 3px;
+        }
+        .btn {
+            padding: 12px 30px;
+            background: linear-gradient(135deg, #4f46e5, #7c3aed);
+            border: none;
+            border-radius: 25px;
+            color: white;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(124, 58, 237, 0.3);
+            transition: transform 0.1s;
+        }
+        .btn:active {
+            transform: scale(0.98);
+        }
+        .error-msg {
+            color: #ef4444;
+            margin-top: 12px;
+            font-size: 14px;
+            display: none;
+        }
+
+        /* Page 2: Fireworks Arena */
+        #fireworks-page {
+            display: none;
+            width: 100%;
+            height: 100%;
+            position: relative;
+            cursor: crosshair;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+        .controls {
+            position: absolute;
+            bottom: 25px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 5;
+        }
+        .auto-btn {
+            background: #059669;
+            box-shadow: 0 4px 15px rgba(5, 150, 105, 0.3);
+        }
+        .auto-btn.active {
+            background: #dc2626;
+            box-shadow: 0 4px 15px rgba(220, 38, 38, 0.3);
+        }
+    </style>
+</head>
+<body>
+
+    <audio id="shot-sound" src="Shot.mp3" preload="auto"></audio>
+    <audio id="boom-sound" src="boom.mp3" preload="auto"></audio>
+
+    <div id="login-page">
+        <div class="login-box">
+            <h2>Ignition Control</h2>
+            <input type="password" id="password-input" placeholder="PASSWORD">
+            <button class="btn" onclick="checkPassword()">Unlock Sky</button>
+            <div class="error-msg" id="error-message">Access Denied.</div>
+        </div>
+    </div>
+
+    <div id="fireworks-page">
+        <div class="controls">
+            <button class="btn auto-btn" id="auto-toggle" onclick="toggleAutoBombing()">Auto Barrage Off</button>
+        </div>
+        <canvas id="canvas"></canvas>
+    </div>
+
+    <script>
+        // Password logic (Set to "password")
+        function checkPassword() {
+            if (document.getElementById('password-input').value === "password") {
+                document.getElementById('login-page').style.opacity = '0';
+                setTimeout(() => {
+                    document.getElementById('login-page').style.display = 'none';
+                    document.getElementById('fireworks-page').style.display = 'block';
+                    initCanvas();
+                }, 400);
+            } else {
+                document.getElementById('error-message').style.display = 'block';
+            }
+        }
+
+        // --- HIGH-PERFORMANCE REALISTIC SIMULATOR ---
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d', { alpha: false }); 
+        const shotSound = document.getElementById('shot-sound');
+        const boomSound = document.getElementById('boom-sound');
+        
+        let r_list = [];
+        let p_list = [];
+        let flashAlpha = 0;
+        let flashHue = 0;
+        let isAutoBombing = false;
+        let autoTimer = 0;
+
+        // Realistic Physics Modifiers
+        const GRAVITY = 0.07;     // Gravity pulls down
+        const DRAG = 0.965;       // Air resistance slows particles down
+        const MAX_P = 1000;       // Safety ceiling to prevent lag spikes
+
+        function initCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            ctx.fillStyle = '#010103';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        window.addEventListener('resize', () => { if(canvas.width) initCanvas(); });
+
+        // Dynamic audio pooling for responsive sound playbacks
+        function playSound(element, volume = 0.5) {
+            const clone = element.cloneNode();
+            clone.volume = volume;
+            // Introduce subtle pitching variability to break audio monotony
+            clone.playbackRate = 0.9 + Math.random() * 0.2;
+            clone.play().catch(() => {});
+        }
+
+        // 1. Realistic Parabolic Rocket (Skyshot launch)
+        class Rocket {
+            constructor(tx, ty) {
+                // Launch from random bottom positions near center
+                this.x = Math.random() * (canvas.width * 0.4) + (canvas.width * 0.3);
+                this.y = canvas.height + 5;
+                this.tx = tx;
+                this.ty = ty;
+                
+                // Calculate dynamic physics pathing
+                const duration = 40; 
+                this.vx = (tx - this.x) / duration;
+                this.vy = (ty - this.y) / duration - 2.5; // Upward velocity boost
+                
+                playSound(shotSound, 0.4); // Trigger Launch Audio instantly
+            }
+
+            update() {
+                this.x += this.vx;
+                this.vy += GRAVITY; // Affected by gravity over flight time
+                this.y += this.vy;
+
+                // Explode criteria: falling downward or reaching target depth
+                if (this.vy >= -0.1 || this.y <= this.ty) {
+                    explodeShell(this.x, this.y);
+                    return false;
+                }
+                return true;
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.moveTo(this.x, this.y);
+                // The trail line follows velocity directly
+                ctx.lineTo(this.x - this.vx * 2, this.y - this.vy * 2);
+                ctx.strokeStyle = 'rgba(255, 170, 70, 0.7)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        }
+
+        // 2. Velocity-Linked Explosive Particles
+        class Particle {
+            constructor(x, y, hue) {
+                this.x = x;
+                this.y = y;
+                
+                const angle = Math.random() * Math.PI * 2;
+                const force = Math.random() * 6 + 1.5;
+                
+                this.vx = Math.cos(angle) * force;
+                this.vy = Math.sin(angle) * force;
+                
+                this.hue = hue + Math.floor(Math.random() * 20 - 10);
+                this.alpha = 1;
+                this.decay = Math.random() * 0.012 + 0.008; // Organic varied burn rates
+            }
+
+            update() {
+                this.vx *= DRAG;
+                this.vy *= DRAG;
+                this.vy += GRAVITY * 0.35; // Floating soot physics
+                this.x += this.vx;
+                this.y += this.vy;
+                this.alpha -= this.decay;
+                
+                return this.alpha > 0;
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.moveTo(this.x, this.y);
+                // Stretches the particle along its current movement speed vector (High Realism Look)
+                ctx.lineTo(this.x - this.vx * 1.2, this.y - this.vy * 1.2);
+                ctx.strokeStyle = `hsla(${this.hue}, 100%, 72%, ${this.alpha})`;
+                ctx.lineWidth = 1.8;
+                ctx.stroke();
+            }
+        }
+
+        function explodeShell(x, y) {
+            const hue = Math.floor(Math.random() * 360);
+            
+            // Set night sky atmospheric illumination variables
+            flashAlpha = 0.12;
+            flashHue = hue;
+
+            // Strict performance protection balancing
+            const count = p_list.length > MAX_P ? 45 : 90;
+            
+            for (let i = 0; i < count; i++) {
+                p_list.push(new Particle(x, y, hue));
+            }
+
+            // Realism Feature: Speed of Sound delay based on altitude distance
+            const acousticDelay = (canvas.height - y) * 0.35;
+            setTimeout(() => {
+                playSound(boomSound, 0.6);
+            }, acousticDelay);
+        }
+
+        // Interaction Handler
+        canvas.addEventListener('click', (e) => {
+            r_list.push(new Rocket(e.clientX, e.clientY));
+        });
+
+        // Auto Barrage Logic
+        function toggleAutoBombing() {
+            const btn = document.getElementById('auto-toggle');
+            isAutoBombing = !isAutoBombing;
+            
+            if(isAutoBombing) {
+                btn.textContent = "Auto Barrage Active";
+                btn.classList.add('active');
+                runAutomator();
+            } else {
+                btn.textContent = "Auto Barrage Off";
+                btn.classList.remove('active');
+                clearTimeout(autoTimer);
+            }
+        }
+
+        function runAutomator() {
+            if(!isAutoBombing) return;
+            r_list.push(new Rocket(Math.random() * canvas.width, Math.random() * (canvas.height * 0.5)));
+            autoTimer = setTimeout(runAutomator, Math.random() * 400 + 350);
+        }
+
+        // --- CORE ANIMATION RENDERING LOOP ---
+        function loop() {
+            requestAnimationFrame(loop);
+
+            // Fast trailing trace overlay
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.fillStyle = 'rgba(1, 1, 3, 0.24)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Blending mode change for glowing particles
+            ctx.globalCompositeOperation = 'screen';
+
+            // Volumetric ambient night illumination flash
+            if (flashAlpha > 0) {
+                ctx.fillStyle = `hsla(${flashHue}, 100%, 4%, ${flashAlpha})`;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                flashAlpha -= 0.015;
+            }
+
+            // Update Rockets
+            for (let i = r_list.length - 1; i >= 0; i--) {
+                if (r_list[i].update()) {
+                    r_list[i].draw();
+                } else {
+                    r_list.splice(i, 1);
+                }
+            }
+
+            // Update Blast Particles
+            for (let i = p_list.length - 1; i >= 0; i--) {
+                if (p_list[i].update()) {
+                    p_list[i].draw();
+                } else {
+                    p_list.splice(i, 1);
+                }
+            }
+        }
+
+        loop();
+    </script>
+</body>
+</html>
